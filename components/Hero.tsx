@@ -33,6 +33,7 @@ export default function Hero() {
   const [result, setResult] = useState<{ downloadUrl: string; title: string; platform: string } | null>(null)
   const [error, setError] = useState('')
   const [isPlaying, setIsPlaying] = useState(false)
+  const [isSaving, setIsSaving] = useState(false)
   const [clipboardSuggestion, setClipboardSuggestion] = useState('')
   const [showClipboardBanner, setShowClipboardBanner] = useState(false)
   const hasCheckedClipboard = useRef(false)
@@ -100,17 +101,20 @@ export default function Hero() {
     setStatus('idle')
     setResult(null)
     setIsPlaying(false)
+    setIsSaving(false)
     hasCheckedClipboard.current = false
   }
 
   const handleSaveVideo = () => {
     if (!result) return
+    setIsSaving(true)
     const a = document.createElement('a')
     a.href = proxyUrl(result.downloadUrl)
     a.download = `${result.title ?? 'clipio-video'}.mp4`
     document.body.appendChild(a)
     a.click()
     document.body.removeChild(a)
+    setTimeout(() => setIsSaving(false), 3000)
   }
 
   return (
@@ -293,10 +297,20 @@ export default function Hero() {
             <div className="px-4 py-4">
               <button
                 onClick={handleSaveVideo}
-                className="w-full flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-500 hover:to-fuchsia-500 py-3 text-sm font-semibold text-white transition"
+                disabled={isSaving}
+                className="w-full flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-500 hover:to-fuchsia-500 py-3 text-sm font-semibold text-white transition disabled:opacity-80 disabled:cursor-not-allowed"
               >
-                <Download className="h-4 w-4" />
-                Download
+                {isSaving ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Downloading…
+                  </>
+                ) : (
+                  <>
+                    <Download className="h-4 w-4" />
+                    Download
+                  </>
+                )}
               </button>
             </div>
           </div>
