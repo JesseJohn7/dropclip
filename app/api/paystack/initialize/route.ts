@@ -1,37 +1,42 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from "next/server";
+
+const PLANS = {
+  monthly: 100000, // ₦1,000 in kobo
+  yearly: 1000000, // ₦10,000 in kobo
+};
 
 export async function POST(req: NextRequest) {
-  const { email, plan } = await req.json()
+  const { email, plan } = await req.json();
 
-  if (!email || !plan) {
-    return NextResponse.json({ error: 'Missing email or plan' }, { status: 400 })
+  if (!email || !plan || !PLANS[plan as keyof typeof PLANS]) {
+    return NextResponse.json({ error: "Invalid request" }, { status: 400 });
   }
 
-  const amount = plan === 'yearly' ? 1000000 : 100000
+  const amount = PLANS[plan as keyof typeof PLANS];
+  const callbackUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/paystack/verify`;
 
-  const response = await fetch('https://api.paystack.co/transaction/initialize', {
-    method: 'POST',
+  const response = await fetch("https://api.paystack.co/transaction/initialize", {
+    method: "POST",
     headers: {
       Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
-      'Content-Type': 'application/json',
+      "Content-Type": "application/json",
     },
     body: JSON.stringify({
       email,
       amount,
-      currency: 'NGN',
-      metadata: { plan },
-      callback_url: `https://clipio-tau.vercel.app/api/paystack/verify`,
+      callback_url: callbackUrl,
+      metadata: { plan, email },
     }),
-  })
+  });
 
-  const data = await response.json()
+  const data = await response.json();
 
   if (!data.status) {
-    return NextResponse.json({ error: data.message }, { status: 400 })
+    return NextResponse.json({ error: "Paystack error" }, { status: 500 });
   }
 
   return NextResponse.json({
-    url: data.data.authorization_url,
+    authorization_url: data.data.authorization_url,
     reference: data.data.reference,
-  })
+  });
 }
