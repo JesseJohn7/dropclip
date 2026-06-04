@@ -1,7 +1,8 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
-import { Download, Link2, Loader2, CheckCircle, XCircle, Play, X, Clipboard } from 'lucide-react'
+import { Download, Link2, Loader2, CheckCircle, XCircle, Play, X, Clipboard, Crown, Mail } from 'lucide-react'
+import Link from 'next/link'
 
 const PLATFORMS = [
   { label: 'TikTok', domains: ['tiktok.com'], color: 'text-pink-400 border-pink-500/40 bg-pink-500/10' },
@@ -37,6 +38,48 @@ export default function Hero() {
   const [clipboardSuggestion, setClipboardSuggestion] = useState('')
   const [showClipboardBanner, setShowClipboardBanner] = useState(false)
   const hasCheckedClipboard = useRef(false)
+
+  // Subscription state
+  const [email, setEmail] = useState('')
+  const [isSubscribed, setIsSubscribed] = useState(false)
+  const [showEmailPrompt, setShowEmailPrompt] = useState(false)
+  const [checkingAccess, setCheckingAccess] = useState(false)
+
+  // Load saved email on mount and verify it
+  useEffect(() => {
+    const saved = localStorage.getItem('clipio_email')
+    if (saved) {
+      setEmail(saved)
+      verifyEmail(saved)
+    }
+  }, [])
+
+  const verifyEmail = async (emailToCheck: string) => {
+    if (!emailToCheck) return
+    setCheckingAccess(true)
+    try {
+      const res = await fetch(`/api/check-access?email=${encodeURIComponent(emailToCheck)}`)
+      const data = await res.json()
+      setIsSubscribed(data.subscribed)
+    } catch {
+      setIsSubscribed(false)
+    } finally {
+      setCheckingAccess(false)
+    }
+  }
+
+  const handleEmailSubmit = async () => {
+    if (!email || !email.includes('@')) return
+    localStorage.setItem('clipio_email', email)
+    await verifyEmail(email)
+    setShowEmailPrompt(false)
+  }
+
+  const handleSignOut = () => {
+    localStorage.removeItem('clipio_email')
+    setEmail('')
+    setIsSubscribed(false)
+  }
 
   useEffect(() => {
     const checkClipboard = async () => {
@@ -74,6 +117,18 @@ export default function Hero() {
       setError('Please paste a valid video URL')
       return
     }
+
+    // Require subscription — show prompt if no email, else let server decide
+    if (!isSubscribed) {
+      if (!email) {
+        setShowEmailPrompt(true)
+      } else {
+        setError('')
+        // Will get 403 from server with requiresSubscription flag
+      }
+      if (!email) return
+    }
+
     setStatus('loading')
     setError('')
     setResult(null)
@@ -83,9 +138,17 @@ export default function Hero() {
       const res = await fetch('/api/download', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url }),
+        body: JSON.stringify({ url, email: email || undefined }),
       })
       const data = await res.json()
+
+      if (data.requiresSubscription) {
+        setStatus('error')
+        setError('') // handled by the upgrade banner below
+        setShowEmailPrompt(false)
+        return
+      }
+
       if (!res.ok) throw new Error(data.error || 'Download failed')
       setResult(data)
       setStatus('success')
@@ -117,6 +180,9 @@ export default function Hero() {
     setTimeout(() => setIsSaving(false), 3000)
   }
 
+  // Needs upgrade: has email but not subscribed and tried to download
+  const needsUpgrade = status === 'error' && !error && email && !isSubscribed
+
   return (
     <section className="relative w-full min-h-[90vh] flex flex-col items-center justify-center bg-black px-4 pb-20 pt-32 overflow-hidden">
 
@@ -129,7 +195,7 @@ export default function Hero() {
       <div className="mb-6 flex items-center gap-2 rounded-full border border-violet-500/30 bg-violet-500/10 px-4 py-1.5">
         <span className="h-1.5 w-1.5 rounded-full bg-violet-400 animate-pulse" />
         <span className="text-xs font-medium text-violet-300 tracking-wide">
-          Free · No signup needed · Instant downloads
+          Pro plan · Unlimited downloads · Full quality
         </span>
       </div>
 
@@ -141,9 +207,90 @@ export default function Hero() {
         </span>
       </h1>
 
-      <p className="text-zinc-400 text-base md:text-lg text-center max-w-xl mb-12">
+      <p className="text-zinc-400 text-base md:text-lg text-center max-w-xl mb-8">
         Paste a link from TikTok, X, Facebook, Instagram and download instantly in full quality.
       </p>
+
+      {/* Subscription status bar */}
+      <div className="w-full max-w-2xl mb-6">
+        {checkingAccess ? (
+          <div className="flex items-center justify-center gap-2 text-zinc-500 text-xs py-2">
+            <Loader2 className="h-3 w-3 animate-spin" />
+            Checking access…
+          </div>
+        ) : isSubscribed ? (
+          <div className="flex items-center justify-between gap-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-2.5">
+            <div className="flex items-center gap-2">
+              <Crown className="h-4 w-4 text-emerald-400" />
+              <span className="text-xs text-emerald-300 font-medium">Pro · {email}</span>
+            </div>
+            <button onClick={handleSignOut} className="text-xs text-zinc-500 hover:text-white transition">
+              Sign out
+            </button>
+          </div>
+        ) : email ? (
+          <div className="flex items-center justify-between gap-3 rounded-xl border border-yellow-500/30 bg-yellow-500/10 px-4 py-2.5">
+            <div className="flex items-center gap-2">
+              <Mail className="h-4 w-4 text-yellow-400" />
+              <span className="text-xs text-yellow-300">{email} · No active subscription</span>
+            </div>
+            <div className="flex items-center gap-3">
+              <Link href="/pricing" className="text-xs font-semibold text-white bg-yellow-600 hover:bg-yellow-500 px-3 py-1 rounded-lg transition">
+                Upgrade
+              </Link>
+              <button onClick={handleSignOut} className="text-xs text-zinc-500 hover:text-white transition">
+                Change
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="flex items-center justify-between gap-3 rounded-xl border border-zinc-700 bg-zinc-900/60 px-4 py-2.5">
+            <span className="text-xs text-zinc-400">Clipio Pro required to download · ₦1,000/month</span>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setShowEmailPrompt(true)}
+                className="text-xs font-semibold text-violet-300 hover:text-white transition"
+              >
+                I have a plan
+              </button>
+              <Link href="/pricing" className="text-xs font-semibold text-white bg-violet-600 hover:bg-violet-500 px-3 py-1 rounded-lg transition">
+                Get Pro
+              </Link>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Email prompt modal (inline) */}
+      {showEmailPrompt && (
+        <div className="w-full max-w-2xl mb-4 rounded-2xl border border-violet-500/30 bg-zinc-900/95 backdrop-blur px-5 py-4">
+          <p className="text-sm font-semibold text-white mb-1">Enter your subscriber email</p>
+          <p className="text-xs text-zinc-500 mb-3">Use the email you paid with on Paystack</p>
+          <div className="flex gap-2">
+            <input
+              type="email"
+              placeholder="you@email.com"
+              value={email}
+              onChange={e => setEmail(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && handleEmailSubmit()}
+              className="flex-1 px-3 py-2 rounded-xl bg-zinc-800 border border-zinc-700 text-white text-sm placeholder-zinc-600 focus:outline-none focus:border-violet-500"
+              autoFocus
+            />
+            <button
+              onClick={handleEmailSubmit}
+              className="px-4 py-2 bg-violet-600 hover:bg-violet-500 rounded-xl text-sm font-semibold text-white transition"
+            >
+              Verify
+            </button>
+            <button
+              onClick={() => setShowEmailPrompt(false)}
+              className="px-3 py-2 bg-zinc-800 hover:bg-zinc-700 rounded-xl text-zinc-400 hover:text-white transition"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Search Bar */}
       <div className="w-full max-w-2xl">
@@ -153,9 +300,7 @@ export default function Hero() {
           <div className="mb-3 flex items-center justify-between gap-3 rounded-xl border border-violet-500/30 bg-violet-500/10 px-4 py-2.5">
             <div className="flex items-center gap-2 min-w-0">
               <Clipboard className="h-4 w-4 text-violet-400 shrink-0" />
-              <span className="text-xs text-violet-300 truncate">
-                Video link copied — paste it?
-              </span>
+              <span className="text-xs text-violet-300 truncate">Video link copied — paste it?</span>
             </div>
             <div className="flex items-center gap-2 shrink-0">
               <button
@@ -164,10 +309,7 @@ export default function Hero() {
               >
                 Paste
               </button>
-              <button
-                onClick={() => setShowClipboardBanner(false)}
-                className="text-zinc-500 hover:text-white transition"
-              >
+              <button onClick={() => setShowClipboardBanner(false)} className="text-zinc-500 hover:text-white transition">
                 <X className="h-4 w-4" />
               </button>
             </div>
@@ -175,7 +317,7 @@ export default function Hero() {
         )}
 
         <div className={`rounded-2xl border bg-zinc-900/80 backdrop-blur transition-all duration-300 ${
-          status === 'error'
+          status === 'error' && error
             ? 'border-red-500/60 shadow-red-500/10 shadow-lg'
             : 'border-zinc-700 focus-within:border-violet-500/60 focus-within:shadow-violet-500/10 focus-within:shadow-lg'
         }`}>
@@ -241,15 +383,30 @@ export default function Hero() {
           </div>
         )}
 
+        {/* Upgrade prompt (no active sub) */}
+        {needsUpgrade && (
+          <div className="mt-3 rounded-xl border border-violet-500/30 bg-violet-500/10 px-4 py-3">
+            <p className="text-sm font-semibold text-white mb-1">Clipio Pro required</p>
+            <p className="text-xs text-zinc-400 mb-3">
+              Subscribe for ₦1,000/month or ₦10,000/year to unlock unlimited downloads.
+            </p>
+            <Link
+              href="/pricing"
+              className="inline-flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-500 hover:to-fuchsia-500 rounded-xl text-sm font-semibold text-white transition"
+            >
+              <Crown className="h-4 w-4" />
+              Get Clipio Pro
+            </Link>
+          </div>
+        )}
+
         {/* Success Preview Card */}
         {status === 'success' && result && (
           <div className="mt-4 rounded-2xl border border-zinc-800 bg-zinc-900/90 overflow-hidden shadow-2xl shadow-violet-500/5">
             <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
               <div className="flex items-center gap-2 min-w-0">
                 <CheckCircle className="h-4 w-4 text-emerald-400 shrink-0" />
-                <span className="text-sm font-medium text-white truncate">
-                  {result.title}
-                </span>
+                <span className="text-sm font-medium text-white truncate">{result.title}</span>
               </div>
               {(() => {
                 const p = PLATFORMS.find(p => p.label === result.platform)
@@ -301,15 +458,9 @@ export default function Hero() {
                 className="w-full flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-500 hover:to-fuchsia-500 py-3 text-sm font-semibold text-white transition disabled:opacity-80 disabled:cursor-not-allowed"
               >
                 {isSaving ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    Downloading…
-                  </>
+                  <><Loader2 className="h-4 w-4 animate-spin" />Downloading…</>
                 ) : (
-                  <>
-                    <Download className="h-4 w-4" />
-                    Download
-                  </>
+                  <><Download className="h-4 w-4" />Download</>
                 )}
               </button>
             </div>

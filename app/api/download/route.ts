@@ -20,8 +20,20 @@ function buildFilename(platform: string): string {
   return `Clipio-${platform}-${timestamp}.mp4`
 }
 
+async function isSubscribed(email: string): Promise<boolean> {
+  const { data } = await supabase
+    .from('subscribers')
+    .select('expires_at, status')
+    .eq('email', email.toLowerCase().trim())
+    .eq('status', 'active')
+    .single()
+
+  if (!data) return false
+  return new Date(data.expires_at) > new Date()
+}
+
 export async function POST(req: NextRequest) {
-  let body: { url?: string }
+  let body: { url?: string; email?: string }
 
   try {
     body = await req.json()
@@ -29,7 +41,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid request body.' }, { status: 400 })
   }
 
-  const { url } = body
+  const { url, email } = body
+
   if (!url || typeof url !== 'string' || !url.trim()) {
     return NextResponse.json({ error: 'URL is required.' }, { status: 400 })
   }
@@ -38,6 +51,14 @@ export async function POST(req: NextRequest) {
     new URL(url)
   } catch {
     return NextResponse.json({ error: 'Invalid URL.' }, { status: 400 })
+  }
+
+  // --- Subscription gate ---
+  if (!email || !(await isSubscribed(email))) {
+    return NextResponse.json(
+      { error: 'A Clipio Pro subscription is required to download.', requiresSubscription: true },
+      { status: 403 }
+    )
   }
 
   const platform = detectPlatform(url)
@@ -49,9 +70,7 @@ export async function POST(req: NextRequest) {
     .select('id')
     .single()
 
-  if (insertError) {
-    console.error('Supabase insert error:', insertError)
-  }
+  if (insertError) console.error('Supabase insert error:', insertError)
 
   const rowId = insertedRow?.id
 
@@ -70,7 +89,7 @@ export async function POST(req: NextRequest) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Accept': 'application/json',
+        Accept: 'application/json',
       },
       body: JSON.stringify({
         url,
@@ -91,7 +110,6 @@ export async function POST(req: NextRequest) {
     }
 
     const data = await cobaltRes.json()
-    console.log('Cobalt response:', data)
 
     if (data.status === 'error') {
       await updateStatus('failed')
@@ -117,12 +135,7 @@ export async function POST(req: NextRequest) {
 
     await updateStatus('success')
 
-    return NextResponse.json({
-      downloadUrl,
-      title: buildFilename(platform),
-      platform,
-    })
-
+    return NextResponse.json({ downloadUrl, title: buildFilename(platform), platform })
   } catch (err: any) {
     console.error('Download error:', err)
     await updateStatus('failed')
