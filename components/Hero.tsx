@@ -118,13 +118,11 @@ export default function Hero() {
       return
     }
 
-    // Require subscription — show prompt if no email, else let server decide
     if (!isSubscribed) {
       if (!email) {
         setShowEmailPrompt(true)
       } else {
         setError('')
-        // Will get 403 from server with requiresSubscription flag
       }
       if (!email) return
     }
@@ -144,7 +142,7 @@ export default function Hero() {
 
       if (data.requiresSubscription) {
         setStatus('error')
-        setError('') // handled by the upgrade banner below
+        setError('')
         setShowEmailPrompt(false)
         return
       }
@@ -180,7 +178,6 @@ export default function Hero() {
     setTimeout(() => setIsSaving(false), 3000)
   }
 
-  // Needs upgrade: has email but not subscribed and tried to download
   const needsUpgrade = status === 'error' && !error && email && !isSubscribed
 
   return (
@@ -244,16 +241,22 @@ export default function Hero() {
             </div>
           </div>
         ) : (
-          <div className="flex items-center justify-between gap-3 rounded-xl border border-zinc-700 bg-zinc-900/60 px-4 py-2.5">
-            <span className="text-xs text-zinc-400">Clipio Pro required to download · ₦1,000/month</span>
-            <div className="flex items-center gap-2">
+          // UPDATED: Responsive no-subscription bar
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 rounded-xl border border-zinc-700 bg-zinc-900/60 px-4 py-3">
+            <span className="text-xs text-zinc-400 leading-relaxed">
+              Clipio Pro required to download · <span className="text-violet-400 font-medium">₦1,000/month</span>
+            </span>
+            <div className="flex items-center gap-2 w-full sm:w-auto">
               <button
                 onClick={() => setShowEmailPrompt(true)}
-                className="text-xs font-semibold text-violet-300 hover:text-white transition"
+                className="flex-1 sm:flex-none text-xs font-semibold text-violet-300 hover:text-white border border-violet-500/30 hover:border-violet-400/60 bg-violet-500/10 hover:bg-violet-500/20 px-3 py-2 sm:py-1.5 rounded-lg transition text-center"
               >
                 I have a plan
               </button>
-              <Link href="/pricing" className="text-xs font-semibold text-white bg-violet-600 hover:bg-violet-500 px-3 py-1 rounded-lg transition">
+              <Link
+                href="/pricing"
+                className="flex-1 sm:flex-none text-xs font-semibold text-white bg-violet-600 hover:bg-violet-500 px-3 py-2 sm:py-1 rounded-lg transition text-center"
+              >
                 Get Pro
               </Link>
             </div>
