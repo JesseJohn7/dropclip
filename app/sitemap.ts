@@ -1,26 +1,18 @@
-import { MetadataRoute } from 'next';
+import { MetadataRoute } from 'next'
 
 export default function sitemap(): MetadataRoute.Sitemap {
-  const baseUrl = 'https://clipio.online';
-  
   return [
     {
-      url: baseUrl,
-      changeFrequency: 'daily',
-      priority: 1,
+      url: 'https://clipio.online',
       lastModified: new Date(),
-    },
-    {
-      url: `${baseUrl}/pricing`,
       changeFrequency: 'weekly',
-      priority: 0.8,
-      lastModified: new Date(),
+      priority: 1.0,
     },
     {
-      url: `${baseUrl}/success`,
-      changeFrequency: 'monthly',
-      priority: 0.6,
+      url: 'https://clipio.online/pricing',
       lastModified: new Date(),
+      changeFrequency: 'monthly',
+      priority: 0.8,
     },
-  ];
+  ]
 }
