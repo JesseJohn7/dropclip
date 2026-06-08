@@ -71,8 +71,7 @@ export const metadata: Metadata = {
     canonical: 'https://clipio.online',
   },
   verification: {
-    // Paste your Google Search Console verification code here in Step 5
-    google: 'PASTE_YOUR_GOOGLE_VERIFICATION_CODE_HERE',
+    google: 'K5oc9P4LlT05gye2fzmEC5LY-bcawiQbAYGoA_WyvhE',
   },
 }
 
@@ -84,7 +83,6 @@ export default function RootLayout({
   return (
     <html lang="en">
       <head>
-        {/* JSON-LD Structured Data */}
         <script
           type="application/ld+json"
           dangerouslySetInnerHTML={{
