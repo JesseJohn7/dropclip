@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
-import { Download, Link2, Loader2, CheckCircle, XCircle, Play, X, Clipboard, Crown, Mail } from 'lucide-react'
+import { Download, Link2, Loader2, CheckCircle, XCircle, Play, X, Clipboard, Crown, Mail, Zap } from 'lucide-react'
 import Link from 'next/link'
 
 const PLATFORMS = [
@@ -31,7 +31,12 @@ function isVideoUrl(val: string) {
 export default function Hero() {
   const [url, setUrl] = useState('')
   const [status, setStatus] = useState<Status>('idle')
-  const [result, setResult] = useState<{ downloadUrl: string; title: string; platform: string } | null>(null)
+  const [result, setResult] = useState<{
+    downloadUrl: string
+    title: string
+    platform: string
+    freeDownloadsRemaining?: number
+  } | null>(null)
   const [error, setError] = useState('')
   const [isPlaying, setIsPlaying] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
@@ -45,7 +50,9 @@ export default function Hero() {
   const [showEmailPrompt, setShowEmailPrompt] = useState(false)
   const [checkingAccess, setCheckingAccess] = useState(false)
 
-  // Load saved email on mount and verify it
+  // Free tier
+  const [hitFreeLimit, setHitFreeLimit] = useState(false)
+
   useEffect(() => {
     const saved = localStorage.getItem('clipio_email')
     if (saved) {
@@ -118,19 +125,11 @@ export default function Hero() {
       return
     }
 
-    if (!isSubscribed) {
-      if (!email) {
-        setShowEmailPrompt(true)
-      } else {
-        setError('')
-      }
-      if (!email) return
-    }
-
     setStatus('loading')
     setError('')
     setResult(null)
     setIsPlaying(false)
+    setHitFreeLimit(false)
 
     try {
       const res = await fetch('/api/download', {
@@ -142,8 +141,8 @@ export default function Hero() {
 
       if (data.requiresSubscription) {
         setStatus('error')
+        setHitFreeLimit(!!data.freeLimit)
         setError('')
-        setShowEmailPrompt(false)
         return
       }
 
@@ -163,6 +162,7 @@ export default function Hero() {
     setResult(null)
     setIsPlaying(false)
     setIsSaving(false)
+    setHitFreeLimit(false)
     hasCheckedClipboard.current = false
   }
 
@@ -178,7 +178,8 @@ export default function Hero() {
     setTimeout(() => setIsSaving(false), 3000)
   }
 
-  const needsUpgrade = status === 'error' && !error && email && !isSubscribed
+  // needsUpgrade = has email, not subscribed, NOT a free limit hit — means they have a bad/expired sub
+  const needsUpgrade = status === 'error' && !error && !hitFreeLimit && !!email && !isSubscribed
 
   return (
     <section className="relative w-full min-h-[90vh] flex flex-col items-center justify-center bg-black px-4 pb-20 pt-32 overflow-hidden">
@@ -192,7 +193,7 @@ export default function Hero() {
       <div className="mb-6 flex items-center gap-2 rounded-full border border-violet-500/30 bg-violet-500/10 px-4 py-1.5">
         <span className="h-1.5 w-1.5 rounded-full bg-violet-400 animate-pulse" />
         <span className="text-xs font-medium text-violet-300 tracking-wide">
-          Pro plan · Unlimited downloads · Full quality
+          3 free downloads daily · Pro for unlimited
         </span>
       </div>
 
@@ -205,7 +206,7 @@ export default function Hero() {
       </h1>
 
       <p className="text-zinc-400 text-base md:text-lg text-center max-w-xl mb-8">
-        Paste a link from TikTok, X, Facebook, Instagram and download instantly in full quality.
+        Paste a link from TikTok, X, Facebook, or Instagram and download instantly in full quality.
       </p>
 
       {/* Subscription status bar */}
@@ -241,11 +242,13 @@ export default function Hero() {
             </div>
           </div>
         ) : (
-          // UPDATED: Responsive no-subscription bar
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 rounded-xl border border-zinc-700 bg-zinc-900/60 px-4 py-3">
-            <span className="text-xs text-zinc-400 leading-relaxed">
-              Clipio Pro required to download · <span className="text-violet-400 font-medium">₦1,000/month</span>
-            </span>
+            <div className="flex items-center gap-2">
+              <Zap className="h-3.5 w-3.5 text-violet-400 shrink-0" />
+              <span className="text-xs text-zinc-400 leading-relaxed">
+                3 free downloads/day · <span className="text-violet-400 font-medium">Pro from ₦1,000/month</span>
+              </span>
+            </div>
             <div className="flex items-center gap-2 w-full sm:w-auto">
               <button
                 onClick={() => setShowEmailPrompt(true)}
@@ -339,6 +342,7 @@ export default function Hero() {
               onChange={e => {
                 setUrl(e.target.value)
                 setError('')
+                setHitFreeLimit(false)
                 if (status === 'success') {
                   setStatus('idle')
                   setResult(null)
@@ -378,7 +382,7 @@ export default function Hero() {
           </div>
         </div>
 
-        {/* Error */}
+        {/* Generic error */}
         {error && (
           <div className="mt-3 flex items-center gap-2 text-red-400 text-sm px-1">
             <XCircle className="h-4 w-4 shrink-0" />
@@ -386,7 +390,35 @@ export default function Hero() {
           </div>
         )}
 
-        {/* Upgrade prompt (no active sub) */}
+        {/* Free limit hit */}
+        {hitFreeLimit && (
+          <div className="mt-3 rounded-xl border border-orange-500/30 bg-orange-500/10 px-4 py-3">
+            <div className="flex items-center gap-2 mb-1">
+              <Zap className="h-4 w-4 text-orange-400 shrink-0" />
+              <p className="text-sm font-semibold text-white">You've used all 3 free downloads today</p>
+            </div>
+            <p className="text-xs text-zinc-400 mb-3">
+              Free downloads reset at midnight. Subscribe to Clipio Pro for unlimited downloads anytime — no limits, full quality.
+            </p>
+            <div className="flex items-center gap-2 flex-wrap">
+              <Link
+                href="/pricing"
+                className="inline-flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-500 hover:to-fuchsia-500 rounded-xl text-sm font-semibold text-white transition"
+              >
+                <Crown className="h-4 w-4" />
+                Get Clipio Pro
+              </Link>
+              <button
+                onClick={() => setShowEmailPrompt(true)}
+                className="text-xs text-violet-400 hover:text-violet-300 border border-violet-500/30 hover:border-violet-400/50 px-3 py-2 rounded-xl transition"
+              >
+                Already subscribed?
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Has email, not subscribed, not free limit — expired/invalid sub */}
         {needsUpgrade && (
           <div className="mt-3 rounded-xl border border-violet-500/30 bg-violet-500/10 px-4 py-3">
             <p className="text-sm font-semibold text-white mb-1">Clipio Pro required</p>
@@ -400,6 +432,21 @@ export default function Hero() {
               <Crown className="h-4 w-4" />
               Get Clipio Pro
             </Link>
+          </div>
+        )}
+
+        {/* Free downloads remaining — shown below the search bar after a successful free download */}
+        {status === 'success' && result && typeof result.freeDownloadsRemaining === 'number' && (
+          <div className="mt-2 flex items-center gap-2 px-1">
+            <Zap className="h-3.5 w-3.5 text-violet-400 shrink-0" />
+            <span className="text-xs text-zinc-500">
+              {result.freeDownloadsRemaining === 0
+                ? 'Last free download used today. '
+                : `${result.freeDownloadsRemaining} free download${result.freeDownloadsRemaining === 1 ? '' : 's'} left today. `}
+              <Link href="/pricing" className="text-violet-400 hover:text-violet-300 underline underline-offset-2 transition">
+                Go unlimited with Pro →
+              </Link>
+            </span>
           </div>
         )}
 
