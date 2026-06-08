@@ -1,0 +1,22 @@
+# Allow all bots
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /admin/
+
+# Specific rules for Google
+User-agent: Googlebot
+Allow: /
+
+# Specific rules for Bing
+User-agent: Bingbot
+Allow: /
+
+# Sitemap locations
+Sitemap: https://clipio.online/sitemap.xml
+
+# Crawl delay
+Crawl-delay: 1
+
+# Host
+Host: https://clipio.online
