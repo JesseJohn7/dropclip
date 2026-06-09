@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
-import { Download, Link2, Loader2, CheckCircle, XCircle, Play, X, Clipboard, Crown, Mail, Zap } from 'lucide-react'
+import { useState, useEffect, useRef, useCallback } from 'react'
+import { Download, Link2, Loader2, CheckCircle, XCircle, Play, X, Clipboard, Crown, Zap } from 'lucide-react'
 import Link from 'next/link'
 
 const PLATFORMS = [
@@ -28,6 +28,14 @@ function isVideoUrl(val: string) {
   } catch { return false }
 }
 
+/** Basic check: has @ and at least one dot after the @ */
+function isLikelyCompleteEmail(val: string) {
+  const i = val.indexOf('@')
+  if (i < 1) return false
+  const domain = val.slice(i + 1)
+  return domain.includes('.') && domain.split('.').every(p => p.length > 0)
+}
+
 export default function Hero() {
   const [url, setUrl] = useState('')
   const [status, setStatus] = useState<Status>('idle')
@@ -46,45 +54,81 @@ export default function Hero() {
 
   // Subscription state
   const [email, setEmail] = useState('')
+  const [emailInput, setEmailInput] = useState('')   // local input state (modal)
   const [isSubscribed, setIsSubscribed] = useState(false)
   const [showEmailPrompt, setShowEmailPrompt] = useState(false)
-  const [checkingAccess, setCheckingAccess] = useState(false)
+  const [isVerifying, setIsVerifying] = useState(false)
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Free tier
   const [hitFreeLimit, setHitFreeLimit] = useState(false)
 
+  // On mount, restore saved email and silently verify
   useEffect(() => {
     const saved = localStorage.getItem('clipio_email')
     if (saved) {
       setEmail(saved)
-      verifyEmail(saved)
+      setEmailInput(saved)
+      silentVerify(saved)
     }
   }, [])
 
-  const verifyEmail = async (emailToCheck: string) => {
+  const silentVerify = async (emailToCheck: string) => {
     if (!emailToCheck) return
-    setCheckingAccess(true)
     try {
       const res = await fetch(`/api/check-access?email=${encodeURIComponent(emailToCheck)}`)
       const data = await res.json()
-      setIsSubscribed(data.subscribed)
+      if (data.subscribed) {
+        setIsSubscribed(true)
+        setEmail(emailToCheck)
+        localStorage.setItem('clipio_email', emailToCheck)
+      } else {
+        // Not subscribed — clear silently, don't show any warning
+        setIsSubscribed(false)
+        // Only clear stored email if we were auto-restoring on mount
+        // (don't clear while user is typing in the prompt)
+      }
     } catch {
       setIsSubscribed(false)
-    } finally {
-      setCheckingAccess(false)
     }
   }
 
-  const handleEmailSubmit = async () => {
-    if (!email || !email.includes('@')) return
-    localStorage.setItem('clipio_email', email)
-    await verifyEmail(email)
-    setShowEmailPrompt(false)
-  }
+  // Auto-verify as user types in the email prompt
+  const handleEmailInput = useCallback((val: string) => {
+    setEmailInput(val)
+    setIsVerifying(false)
+
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+
+    if (!isLikelyCompleteEmail(val)) return
+
+    // Debounce 600ms after user stops typing
+    debounceRef.current = setTimeout(async () => {
+      setIsVerifying(true)
+      try {
+        const res = await fetch(`/api/check-access?email=${encodeURIComponent(val.trim())}`)
+        const data = await res.json()
+        if (data.subscribed) {
+          setEmail(val.trim())
+          setIsSubscribed(true)
+          localStorage.setItem('clipio_email', val.trim())
+          setShowEmailPrompt(false)   // close modal — they're in ✓
+        } else {
+          // Not subscribed — stay on the modal but show nothing alarming
+          setIsSubscribed(false)
+        }
+      } catch {
+        setIsSubscribed(false)
+      } finally {
+        setIsVerifying(false)
+      }
+    }, 600)
+  }, [])
 
   const handleSignOut = () => {
     localStorage.removeItem('clipio_email')
     setEmail('')
+    setEmailInput('')
     setIsSubscribed(false)
   }
 
@@ -178,8 +222,8 @@ export default function Hero() {
     setTimeout(() => setIsSaving(false), 3000)
   }
 
-  // needsUpgrade = has email, not subscribed, NOT a free limit hit — means they have a bad/expired sub
-  const needsUpgrade = status === 'error' && !error && !hitFreeLimit && !!email && !isSubscribed
+  // needsUpgrade: tried to download, no subscription, not a free-limit issue
+  const needsUpgrade = status === 'error' && !error && !hitFreeLimit && !isSubscribed
 
   return (
     <section className="relative w-full min-h-[90vh] flex flex-col items-center justify-center bg-black px-4 pb-20 pt-32 overflow-hidden">
@@ -209,14 +253,10 @@ export default function Hero() {
         Paste a link from TikTok, X, Facebook, or Instagram and download instantly in full quality.
       </p>
 
-      {/* Subscription status bar */}
+      {/* Subscription status bar — only shown when subscribed OR no email at all */}
       <div className="w-full max-w-2xl mb-6">
-        {checkingAccess ? (
-          <div className="flex items-center justify-center gap-2 text-zinc-500 text-xs py-2">
-            <Loader2 className="h-3 w-3 animate-spin" />
-            Checking access…
-          </div>
-        ) : isSubscribed ? (
+        {isSubscribed ? (
+          /* ✅ Pro bar */
           <div className="flex items-center justify-between gap-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-2.5">
             <div className="flex items-center gap-2">
               <Crown className="h-4 w-4 text-emerald-400" />
@@ -226,22 +266,8 @@ export default function Hero() {
               Sign out
             </button>
           </div>
-        ) : email ? (
-          <div className="flex items-center justify-between gap-3 rounded-xl border border-yellow-500/30 bg-yellow-500/10 px-4 py-2.5">
-            <div className="flex items-center gap-2">
-              <Mail className="h-4 w-4 text-yellow-400" />
-              <span className="text-xs text-yellow-300">{email} · No active subscription</span>
-            </div>
-            <div className="flex items-center gap-3">
-              <Link href="/pricing" className="text-xs font-semibold text-white bg-yellow-600 hover:bg-yellow-500 px-3 py-1 rounded-lg transition">
-                Upgrade
-              </Link>
-              <button onClick={handleSignOut} className="text-xs text-zinc-500 hover:text-white transition">
-                Change
-              </button>
-            </div>
-          </div>
         ) : (
+          /* Default: no email / not subscribed — clean CTA, no yellow */
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 rounded-xl border border-zinc-700 bg-zinc-900/60 px-4 py-3">
             <div className="flex items-center gap-2">
               <Zap className="h-3.5 w-3.5 text-violet-400 shrink-0" />
@@ -251,7 +277,7 @@ export default function Hero() {
             </div>
             <div className="flex items-center gap-2 w-full sm:w-auto">
               <button
-                onClick={() => setShowEmailPrompt(true)}
+                onClick={() => { setShowEmailPrompt(true); setEmailInput(email) }}
                 className="flex-1 sm:flex-none text-xs font-semibold text-violet-300 hover:text-white border border-violet-500/30 hover:border-violet-400/60 bg-violet-500/10 hover:bg-violet-500/20 px-3 py-2 sm:py-1.5 rounded-lg transition text-center"
               >
                 I have a plan
@@ -267,27 +293,26 @@ export default function Hero() {
         )}
       </div>
 
-      {/* Email prompt modal (inline) */}
+      {/* Email prompt modal — auto-verifies as you type */}
       {showEmailPrompt && (
         <div className="w-full max-w-2xl mb-4 rounded-2xl border border-violet-500/30 bg-zinc-900/95 backdrop-blur px-5 py-4">
           <p className="text-sm font-semibold text-white mb-1">Enter your subscriber email</p>
           <p className="text-xs text-zinc-500 mb-3">Use the email you paid with on Paystack</p>
           <div className="flex gap-2">
-            <input
-              type="email"
-              placeholder="you@email.com"
-              value={email}
-              onChange={e => setEmail(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && handleEmailSubmit()}
-              className="flex-1 px-3 py-2 rounded-xl bg-zinc-800 border border-zinc-700 text-white text-sm placeholder-zinc-600 focus:outline-none focus:border-violet-500"
-              autoFocus
-            />
-            <button
-              onClick={handleEmailSubmit}
-              className="px-4 py-2 bg-violet-600 hover:bg-violet-500 rounded-xl text-sm font-semibold text-white transition"
-            >
-              Verify
-            </button>
+            <div className="relative flex-1">
+              <input
+                type="email"
+                placeholder="you@email.com"
+                value={emailInput}
+                onChange={e => handleEmailInput(e.target.value)}
+                className="w-full px-3 py-2 pr-8 rounded-xl bg-zinc-800 border border-zinc-700 text-white text-sm placeholder-zinc-600 focus:outline-none focus:border-violet-500"
+                autoFocus
+              />
+              {/* Inline spinner while verifying */}
+              {isVerifying && (
+                <Loader2 className="absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-violet-400 animate-spin" />
+              )}
+            </div>
             <button
               onClick={() => setShowEmailPrompt(false)}
               className="px-3 py-2 bg-zinc-800 hover:bg-zinc-700 rounded-xl text-zinc-400 hover:text-white transition"
@@ -295,6 +320,7 @@ export default function Hero() {
               <X className="h-4 w-4" />
             </button>
           </div>
+          <p className="text-xs text-zinc-600 mt-2">Verifying automatically as you type…</p>
         </div>
       )}
 
@@ -409,7 +435,7 @@ export default function Hero() {
                 Get Clipio Pro
               </Link>
               <button
-                onClick={() => setShowEmailPrompt(true)}
+                onClick={() => { setShowEmailPrompt(true); setEmailInput(email) }}
                 className="text-xs text-violet-400 hover:text-violet-300 border border-violet-500/30 hover:border-violet-400/50 px-3 py-2 rounded-xl transition"
               >
                 Already subscribed?
@@ -418,7 +444,7 @@ export default function Hero() {
           </div>
         )}
 
-        {/* Has email, not subscribed, not free limit — expired/invalid sub */}
+        {/* Needs upgrade — tried to download, no valid sub */}
         {needsUpgrade && (
           <div className="mt-3 rounded-xl border border-violet-500/30 bg-violet-500/10 px-4 py-3">
             <p className="text-sm font-semibold text-white mb-1">Clipio Pro required</p>
@@ -435,7 +461,7 @@ export default function Hero() {
           </div>
         )}
 
-        {/* Free downloads remaining — shown below the search bar after a successful free download */}
+        {/* Free downloads remaining */}
         {status === 'success' && result && typeof result.freeDownloadsRemaining === 'number' && (
           <div className="mt-2 flex items-center gap-2 px-1">
             <Zap className="h-3.5 w-3.5 text-violet-400 shrink-0" />
