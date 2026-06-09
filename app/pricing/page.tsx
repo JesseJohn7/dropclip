@@ -84,7 +84,7 @@ export default function PricingPage() {
           </span>
         </h1>
         <p className="text-zinc-400 text-base max-w-sm">
-          One subscription unlocks everything — every platform, every video, every day.
+          One subscription unlocks everything every platform, every video, every day.
         </p>
       </div>
 
