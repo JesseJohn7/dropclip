@@ -168,7 +168,7 @@ export default function PricingPage() {
 
           {/* Trust line */}
           <div className="flex items-center justify-center gap-1.5 mt-4">
-            <p className="text-zinc-600 text-xs">Secured by Paystack · Cancel anytime</p>
+            <p className="text-zinc-600 text-xs">Secured by Paystack </p>
           </div>
         </div>
       </div>
