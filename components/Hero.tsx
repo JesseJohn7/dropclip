@@ -54,10 +54,11 @@ export default function Hero() {
 
   // Subscription state
   const [email, setEmail] = useState('')
-  const [emailInput, setEmailInput] = useState('')   // local input state (modal)
+  const [emailInput, setEmailInput] = useState('')
   const [isSubscribed, setIsSubscribed] = useState(false)
   const [showEmailPrompt, setShowEmailPrompt] = useState(false)
   const [isVerifying, setIsVerifying] = useState(false)
+  const [emailNotFound, setEmailNotFound] = useState(false)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Free tier
@@ -83,10 +84,7 @@ export default function Hero() {
         setEmail(emailToCheck)
         localStorage.setItem('clipio_email', emailToCheck)
       } else {
-        // Not subscribed — clear silently, don't show any warning
         setIsSubscribed(false)
-        // Only clear stored email if we were auto-restoring on mount
-        // (don't clear while user is typing in the prompt)
       }
     } catch {
       setIsSubscribed(false)
@@ -97,6 +95,7 @@ export default function Hero() {
   const handleEmailInput = useCallback((val: string) => {
     setEmailInput(val)
     setIsVerifying(false)
+    setEmailNotFound(false) // reset on every keystroke
 
     if (debounceRef.current) clearTimeout(debounceRef.current)
 
@@ -111,14 +110,16 @@ export default function Hero() {
         if (data.subscribed) {
           setEmail(val.trim())
           setIsSubscribed(true)
+          setEmailNotFound(false)
           localStorage.setItem('clipio_email', val.trim())
-          setShowEmailPrompt(false)   // close modal — they're in ✓
+          setShowEmailPrompt(false) // close modal — they're in ✓
         } else {
-          // Not subscribed — stay on the modal but show nothing alarming
           setIsSubscribed(false)
+          setEmailNotFound(true) // show "not found" message
         }
       } catch {
         setIsSubscribed(false)
+        setEmailNotFound(false)
       } finally {
         setIsVerifying(false)
       }
@@ -130,6 +131,12 @@ export default function Hero() {
     setEmail('')
     setEmailInput('')
     setIsSubscribed(false)
+    setEmailNotFound(false)
+  }
+
+  const handleCloseEmailPrompt = () => {
+    setShowEmailPrompt(false)
+    setEmailNotFound(false)
   }
 
   useEffect(() => {
@@ -253,7 +260,7 @@ export default function Hero() {
         Paste a link from TikTok, X, Facebook, or Instagram and download instantly in full quality.
       </p>
 
-      {/* Subscription status bar — only shown when subscribed OR no email at all */}
+      {/* Subscription status bar */}
       <div className="w-full max-w-2xl mb-6">
         {isSubscribed ? (
           /* ✅ Pro bar */
@@ -267,7 +274,7 @@ export default function Hero() {
             </button>
           </div>
         ) : (
-          /* Default: no email / not subscribed — clean CTA, no yellow */
+          /* Default: no email / not subscribed */
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 rounded-xl border border-zinc-700 bg-zinc-900/60 px-4 py-3">
             <div className="flex items-center gap-2">
               <Zap className="h-3.5 w-3.5 text-violet-400 shrink-0" />
@@ -305,7 +312,11 @@ export default function Hero() {
                 placeholder="you@email.com"
                 value={emailInput}
                 onChange={e => handleEmailInput(e.target.value)}
-                className="w-full px-3 py-2 pr-8 rounded-xl bg-zinc-800 border border-zinc-700 text-white text-sm placeholder-zinc-600 focus:outline-none focus:border-violet-500"
+                className={`w-full px-3 py-2 pr-8 rounded-xl bg-zinc-800 border text-white text-sm placeholder-zinc-600 focus:outline-none transition ${
+                  emailNotFound
+                    ? 'border-orange-500/60 focus:border-orange-500'
+                    : 'border-zinc-700 focus:border-violet-500'
+                }`}
                 autoFocus
               />
               {/* Inline spinner while verifying */}
@@ -314,13 +325,35 @@ export default function Hero() {
               )}
             </div>
             <button
-              onClick={() => setShowEmailPrompt(false)}
+              onClick={handleCloseEmailPrompt}
               className="px-3 py-2 bg-zinc-800 hover:bg-zinc-700 rounded-xl text-zinc-400 hover:text-white transition"
             >
               <X className="h-4 w-4" />
             </button>
           </div>
-          <p className="text-xs text-zinc-600 mt-2">Verifying automatically as you type…</p>
+
+          {/* Status line below input */}
+          <div className="mt-2 min-h-[1.25rem]">
+            {emailNotFound ? (
+              <p className="text-xs text-orange-400">
+                No active subscription found.{' '}
+                <Link href="/pricing" className="underline underline-offset-2 hover:text-orange-300 transition">
+                  Get Pro →
+                </Link>
+                <span className="text-zinc-600 ml-2">or</span>
+                <button
+                  onClick={handleCloseEmailPrompt}
+                  className="text-zinc-500 hover:text-zinc-300 underline underline-offset-2 ml-2 transition"
+                >
+                  continue free
+                </button>
+              </p>
+            ) : isVerifying ? (
+              <p className="text-xs text-zinc-500">Checking…</p>
+            ) : (
+              <p className="text-xs text-zinc-600">Verifying automatically as you type…</p>
+            )}
+          </div>
         </div>
       )}
 
@@ -451,13 +484,21 @@ export default function Hero() {
             <p className="text-xs text-zinc-400 mb-3">
               Subscribe for ₦1,000/month or ₦10,000/year to unlock unlimited downloads.
             </p>
-            <Link
-              href="/pricing"
-              className="inline-flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-500 hover:to-fuchsia-500 rounded-xl text-sm font-semibold text-white transition"
-            >
-              <Crown className="h-4 w-4" />
-              Get Clipio Pro
-            </Link>
+            <div className="flex items-center gap-2 flex-wrap">
+              <Link
+                href="/pricing"
+                className="inline-flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-500 hover:to-fuchsia-500 rounded-xl text-sm font-semibold text-white transition"
+              >
+                <Crown className="h-4 w-4" />
+                Get Clipio Pro
+              </Link>
+              <button
+                onClick={() => { setShowEmailPrompt(true); setEmailInput(email) }}
+                className="text-xs text-zinc-400 hover:text-white border border-zinc-700 hover:border-zinc-500 px-3 py-2 rounded-xl transition"
+              >
+                I have a subscription
+              </button>
+            </div>
           </div>
         )}
 
