@@ -5,10 +5,12 @@ import { Download, Link2, Loader2, CheckCircle, XCircle, Play, X, Clipboard, Cro
 import Link from 'next/link'
 
 const PLATFORMS = [
-  { label: 'TikTok', domains: ['tiktok.com'], color: 'text-pink-400 border-pink-500/40 bg-pink-500/10' },
-  { label: 'X (Twitter)', domains: ['twitter.com', 'x.com'], color: 'text-sky-400 border-sky-500/40 bg-sky-500/10' },
-  { label: 'Instagram', domains: ['instagram.com'], color: 'text-fuchsia-400 border-fuchsia-500/40 bg-fuchsia-500/10' },
-  { label: 'Facebook', domains: ['facebook.com', 'fb.watch'], color: 'text-blue-400 border-blue-500/40 bg-blue-500/10' },
+  { label: 'TikTok', domains: ['tiktok.com'], color: 'text-pink-400 border-pink-500/40 bg-pink-500/10', proOnly: false },
+  { label: 'X (Twitter)', domains: ['twitter.com', 'x.com'], color: 'text-sky-400 border-sky-500/40 bg-sky-500/10', proOnly: false },
+  { label: 'Instagram', domains: ['instagram.com'], color: 'text-fuchsia-400 border-fuchsia-500/40 bg-fuchsia-500/10', proOnly: false },
+  { label: 'Facebook', domains: ['facebook.com', 'fb.watch'], color: 'text-blue-400 border-blue-500/40 bg-blue-500/10', proOnly: false },
+  { label: 'YouTube', domains: ['youtube.com', 'youtu.be'], color: 'text-red-400 border-red-500/40 bg-red-500/10', proOnly: true },
+  { label: 'LinkedIn', domains: ['linkedin.com'], color: 'text-blue-300 border-blue-400/40 bg-blue-400/10', proOnly: true },
 ]
 
 type Status = 'idle' | 'loading' | 'success' | 'error'
@@ -28,7 +30,6 @@ function isVideoUrl(val: string) {
   } catch { return false }
 }
 
-/** Basic check: has @ and at least one dot after the @ */
 function isLikelyCompleteEmail(val: string) {
   const i = val.indexOf('@')
   if (i < 1) return false
@@ -64,7 +65,10 @@ export default function Hero() {
   // Free tier
   const [hitFreeLimit, setHitFreeLimit] = useState(false)
 
-  // On mount, restore saved email and silently verify
+  // Pro-only blocked
+  const [isProOnly, setIsProOnly] = useState(false)
+  const [blockedPlatform, setBlockedPlatform] = useState('')
+
   useEffect(() => {
     const saved = localStorage.getItem('clipio_email')
     if (saved) {
@@ -91,17 +95,14 @@ export default function Hero() {
     }
   }
 
-  // Auto-verify as user types in the email prompt
   const handleEmailInput = useCallback((val: string) => {
     setEmailInput(val)
     setIsVerifying(false)
-    setEmailNotFound(false) // reset on every keystroke
+    setEmailNotFound(false)
 
     if (debounceRef.current) clearTimeout(debounceRef.current)
-
     if (!isLikelyCompleteEmail(val)) return
 
-    // Debounce 600ms after user stops typing
     debounceRef.current = setTimeout(async () => {
       setIsVerifying(true)
       try {
@@ -112,10 +113,10 @@ export default function Hero() {
           setIsSubscribed(true)
           setEmailNotFound(false)
           localStorage.setItem('clipio_email', val.trim())
-          setShowEmailPrompt(false) // close modal — they're in ✓
+          setShowEmailPrompt(false)
         } else {
           setIsSubscribed(false)
-          setEmailNotFound(true) // show "not found" message
+          setEmailNotFound(true)
         }
       } catch {
         setIsSubscribed(false)
@@ -181,9 +182,14 @@ export default function Hero() {
     setResult(null)
     setIsPlaying(false)
     setHitFreeLimit(false)
+    setIsProOnly(false)
+    setBlockedPlatform('')
 
     try {
-      const res = await fetch('/api/download', {
+      const isYouTube = url.includes('youtube.com') || url.includes('youtu.be')
+      const endpoint = isYouTube ? '/api/youtube' : '/api/download'
+
+      const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url, email: email || undefined }),
@@ -193,6 +199,8 @@ export default function Hero() {
       if (data.requiresSubscription) {
         setStatus('error')
         setHitFreeLimit(!!data.freeLimit)
+        setIsProOnly(!!data.proOnly)
+        setBlockedPlatform(data.platform ?? '')
         setError('')
         return
       }
@@ -214,6 +222,8 @@ export default function Hero() {
     setIsPlaying(false)
     setIsSaving(false)
     setHitFreeLimit(false)
+    setIsProOnly(false)
+    setBlockedPlatform('')
     hasCheckedClipboard.current = false
   }
 
@@ -229,8 +239,7 @@ export default function Hero() {
     setTimeout(() => setIsSaving(false), 3000)
   }
 
-  // needsUpgrade: tried to download, no subscription, not a free-limit issue
-  const needsUpgrade = status === 'error' && !error && !hitFreeLimit && !isSubscribed
+  const needsUpgrade = status === 'error' && !error && !hitFreeLimit && !isProOnly && !isSubscribed
 
   return (
     <section className="relative w-full min-h-[90vh] flex flex-col items-center justify-center bg-black px-4 pb-20 pt-32 overflow-hidden">
@@ -244,7 +253,7 @@ export default function Hero() {
       <div className="mb-6 flex items-center gap-2 rounded-full border border-violet-500/30 bg-violet-500/10 px-4 py-1.5">
         <span className="h-1.5 w-1.5 rounded-full bg-violet-400 animate-pulse" />
         <span className="text-xs font-medium text-violet-300 tracking-wide">
-          3 free downloads daily · Pro for unlimited
+          3 free downloads daily · Pro for unlimited + YouTube & LinkedIn
         </span>
       </div>
 
@@ -257,13 +266,12 @@ export default function Hero() {
       </h1>
 
       <p className="text-zinc-400 text-base md:text-lg text-center max-w-xl mb-8">
-        Paste a link from TikTok, X, Facebook, or Instagram and download instantly in full quality.
+        Paste a link from TikTok, X, Instagram or Facebook — plus YouTube & LinkedIn with Pro.
       </p>
 
       {/* Subscription status bar */}
       <div className="w-full max-w-2xl mb-6">
         {isSubscribed ? (
-          /* ✅ Pro bar */
           <div className="flex items-center justify-between gap-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-2.5">
             <div className="flex items-center gap-2">
               <Crown className="h-4 w-4 text-emerald-400" />
@@ -274,7 +282,6 @@ export default function Hero() {
             </button>
           </div>
         ) : (
-          /* Default: no email / not subscribed */
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 rounded-xl border border-zinc-700 bg-zinc-900/60 px-4 py-3">
             <div className="flex items-center gap-2">
               <Zap className="h-3.5 w-3.5 text-violet-400 shrink-0" />
@@ -300,7 +307,7 @@ export default function Hero() {
         )}
       </div>
 
-      {/* Email prompt modal — auto-verifies as you type */}
+      {/* Email prompt modal */}
       {showEmailPrompt && (
         <div className="w-full max-w-2xl mb-4 rounded-2xl border border-violet-500/30 bg-zinc-900/95 backdrop-blur px-5 py-4">
           <p className="text-sm font-semibold text-white mb-1">Enter your subscriber email</p>
@@ -319,7 +326,6 @@ export default function Hero() {
                 }`}
                 autoFocus
               />
-              {/* Inline spinner while verifying */}
               {isVerifying && (
                 <Loader2 className="absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-violet-400 animate-spin" />
               )}
@@ -332,7 +338,6 @@ export default function Hero() {
             </button>
           </div>
 
-          {/* Status line below input */}
           <div className="mt-2 min-h-[1.25rem]">
             {emailNotFound ? (
               <p className="text-xs text-orange-400">
@@ -390,6 +395,7 @@ export default function Hero() {
             {activePlatform ? (
               <span className={`shrink-0 text-xs font-semibold px-2.5 py-1 rounded-full border ${activePlatform.color} transition-all duration-300`}>
                 {activePlatform.label}
+                {activePlatform.proOnly && <span className="ml-1 text-yellow-400">★</span>}
               </span>
             ) : (
               <Link2 className="h-5 w-5 text-zinc-500 shrink-0" />
@@ -402,6 +408,7 @@ export default function Hero() {
                 setUrl(e.target.value)
                 setError('')
                 setHitFreeLimit(false)
+                setIsProOnly(false)
                 if (status === 'success') {
                   setStatus('idle')
                   setResult(null)
@@ -449,6 +456,34 @@ export default function Hero() {
           </div>
         )}
 
+        {/* Pro-only platform blocked */}
+        {isProOnly && (
+          <div className="mt-3 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3">
+            <div className="flex items-center gap-2 mb-1">
+              <Crown className="h-4 w-4 text-yellow-400 shrink-0" />
+              <p className="text-sm font-semibold text-white">{blockedPlatform} is a Pro feature</p>
+            </div>
+            <p className="text-xs text-zinc-400 mb-3">
+              Upgrade to Clipio Pro to download {blockedPlatform} videos — unlimited, full quality.
+            </p>
+            <div className="flex items-center gap-2 flex-wrap">
+              <Link
+                href="/pricing"
+                className="inline-flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-500 hover:to-fuchsia-500 rounded-xl text-sm font-semibold text-white transition"
+              >
+                <Crown className="h-4 w-4" />
+                Get Clipio Pro
+              </Link>
+              <button
+                onClick={() => { setShowEmailPrompt(true); setEmailInput(email) }}
+                className="text-xs text-zinc-400 hover:text-white border border-zinc-700 hover:border-zinc-500 px-3 py-2 rounded-xl transition"
+              >
+                Already subscribed?
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Free limit hit */}
         {hitFreeLimit && (
           <div className="mt-3 rounded-xl border border-orange-500/30 bg-orange-500/10 px-4 py-3">
@@ -477,7 +512,7 @@ export default function Hero() {
           </div>
         )}
 
-        {/* Needs upgrade — tried to download, no valid sub */}
+        {/* Needs upgrade */}
         {needsUpgrade && (
           <div className="mt-3 rounded-xl border border-violet-500/30 bg-violet-500/10 px-4 py-3">
             <p className="text-sm font-semibold text-white mb-1">Clipio Pro required</p>
@@ -597,6 +632,7 @@ export default function Hero() {
               }`}
             >
               {p.label}
+              {p.proOnly && <span className="ml-1 text-yellow-500/70">★ Pro</span>}
             </span>
           )
         })}
