@@ -35,7 +35,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'URL is required.' }, { status: 400 })
   }
 
-  // Pro only
   const subscribed = email ? await checkSubscribed(email) : false
   if (!subscribed) {
     return NextResponse.json(
@@ -60,36 +59,75 @@ export async function POST(req: NextRequest) {
         url,
         downloadMode: 'audio',
         audioFormat: 'mp3',
-        audioBitrate: '320',
+        audioBitrate: '128',
         filenameStyle: 'pretty',
       }),
+      signal: AbortSignal.timeout(20000),
     })
 
     const data = await cobaltRes.json()
+    console.log('Cobalt response:', JSON.stringify(data))
 
+    // Cobalt can return: redirect, tunnel, stream, picker, or error
     if (data.status === 'error') {
       return NextResponse.json(
-        { error: 'Could not extract audio. Make sure the link is public.' },
+        { error: data.error?.code ?? 'Could not extract audio. Make sure the link is public.' },
         { status: 422 }
       )
     }
 
-    const downloadUrl = data.url
-    if (!downloadUrl) {
-      return NextResponse.json({ error: 'No audio link returned.' }, { status: 422 })
+    // 'redirect' or 'tunnel' — direct usable URL
+    if (data.status === 'redirect' || data.status === 'tunnel') {
+      const downloadUrl = data.url
+      if (!downloadUrl) {
+        return NextResponse.json({ error: 'No audio link returned.' }, { status: 422 })
+      }
+      const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? 'unknown'
+      await supabase.from('download_requests').insert({ url, platform: 'MP3', ip, status: 'success' })
+      return NextResponse.json({
+        downloadUrl,
+        title: `Clipio-Audio-${Date.now()}`,
+        platform: 'MP3',
+        isAudio: true,
+      })
     }
 
-    const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? 'unknown'
-    await supabase.from('download_requests').insert({ url, platform: 'MP3', ip, status: 'success' })
+    // 'stream' status — proxy the audio through our server so browser can download it
+    if (data.status === 'stream' && data.url) {
+      const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? 'unknown'
+      await supabase.from('download_requests').insert({ url, platform: 'MP3', ip, status: 'success' })
+      // Return the stream URL directly — client will fetch it
+      return NextResponse.json({
+        downloadUrl: data.url,
+        title: `Clipio-Audio-${Date.now()}`,
+        platform: 'MP3',
+        isAudio: true,
+      })
+    }
 
-    return NextResponse.json({
-      downloadUrl,
-      title: `Clipio-Audio-${Date.now()}`,
-      platform: 'MP3',
-      isAudio: true,
-    })
+    // Fallback — return whatever URL we got
+    const downloadUrl = data.url
+    if (downloadUrl) {
+      return NextResponse.json({
+        downloadUrl,
+        title: `Clipio-Audio-${Date.now()}`,
+        platform: 'MP3',
+        isAudio: true,
+      })
+    }
+
+    return NextResponse.json(
+      { error: `Unexpected Cobalt response: ${data.status}` },
+      { status: 422 }
+    )
 
   } catch (err: any) {
+    if (err.name === 'TimeoutError' || err.name === 'AbortError') {
+      return NextResponse.json(
+        { error: 'Audio extraction timed out. Try a shorter clip.' },
+        { status: 504 }
+      )
+    }
     console.error('MP3 error:', err)
     return NextResponse.json({ error: 'Server error. Try again.' }, { status: 500 })
   }
