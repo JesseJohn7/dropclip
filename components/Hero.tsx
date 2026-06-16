@@ -9,8 +9,6 @@ const PLATFORMS = [
   { label: 'X (Twitter)', domains: ['twitter.com', 'x.com'], color: 'text-sky-400 border-sky-500/40 bg-sky-500/10', proOnly: false },
   { label: 'Instagram', domains: ['instagram.com'], color: 'text-fuchsia-400 border-fuchsia-500/40 bg-fuchsia-500/10', proOnly: false },
   { label: 'Facebook', domains: ['facebook.com', 'fb.watch'], color: 'text-blue-400 border-blue-500/40 bg-blue-500/10', proOnly: false },
-  { label: 'YouTube', domains: ['youtube.com', 'youtu.be'], color: 'text-red-400 border-red-500/40 bg-red-500/10', proOnly: true },
-  { label: 'LinkedIn', domains: ['linkedin.com'], color: 'text-blue-300 border-blue-400/40 bg-blue-400/10', proOnly: true },
 ]
 
 type Status = 'idle' | 'loading' | 'success' | 'error'
@@ -49,6 +47,7 @@ export default function Hero() {
   const [error, setError] = useState('')
   const [isPlaying, setIsPlaying] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
+  const [isMp3Loading, setIsMp3Loading] = useState(false)
   const [clipboardSuggestion, setClipboardSuggestion] = useState('')
   const [showClipboardBanner, setShowClipboardBanner] = useState(false)
   const hasCheckedClipboard = useRef(false)
@@ -64,10 +63,6 @@ export default function Hero() {
 
   // Free tier
   const [hitFreeLimit, setHitFreeLimit] = useState(false)
-
-  // Pro-only blocked
-  const [isProOnly, setIsProOnly] = useState(false)
-  const [blockedPlatform, setBlockedPlatform] = useState('')
 
   useEffect(() => {
     const saved = localStorage.getItem('clipio_email')
@@ -182,14 +177,9 @@ export default function Hero() {
     setResult(null)
     setIsPlaying(false)
     setHitFreeLimit(false)
-    setIsProOnly(false)
-    setBlockedPlatform('')
 
     try {
-      const isYouTube = url.includes('youtube.com') || url.includes('youtu.be')
-      const endpoint = isYouTube ? '/api/youtube' : '/api/download'
-
-      const res = await fetch(endpoint, {
+      const res = await fetch('/api/download', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url, email: email || undefined }),
@@ -199,8 +189,6 @@ export default function Hero() {
       if (data.requiresSubscription) {
         setStatus('error')
         setHitFreeLimit(!!data.freeLimit)
-        setIsProOnly(!!data.proOnly)
-        setBlockedPlatform(data.platform ?? '')
         setError('')
         return
       }
@@ -221,9 +209,8 @@ export default function Hero() {
     setResult(null)
     setIsPlaying(false)
     setIsSaving(false)
+    setIsMp3Loading(false)
     setHitFreeLimit(false)
-    setIsProOnly(false)
-    setBlockedPlatform('')
     hasCheckedClipboard.current = false
   }
 
@@ -239,7 +226,36 @@ export default function Hero() {
     setTimeout(() => setIsSaving(false), 3000)
   }
 
-  const needsUpgrade = status === 'error' && !error && !hitFreeLimit && !isProOnly && !isSubscribed
+  const handleMp3 = async () => {
+    if (!result) return
+    setIsMp3Loading(true)
+    try {
+      const res = await fetch('/api/mp3', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url, email: email || undefined }),
+      })
+      const data = await res.json()
+
+      if (!res.ok) {
+        alert(data.error || 'Could not extract audio')
+        return
+      }
+
+      const a = document.createElement('a')
+      a.href = proxyUrl(data.downloadUrl)
+      a.download = `${data.title ?? 'clipio-audio'}.mp3`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+    } catch {
+      alert('Failed to extract audio. Try again.')
+    } finally {
+      setIsMp3Loading(false)
+    }
+  }
+
+  const needsUpgrade = status === 'error' && !error && !hitFreeLimit && !isSubscribed
 
   return (
     <section className="relative w-full min-h-[90vh] flex flex-col items-center justify-center bg-black px-4 pb-20 pt-32 overflow-hidden">
@@ -253,7 +269,7 @@ export default function Hero() {
       <div className="mb-6 flex items-center gap-2 rounded-full border border-violet-500/30 bg-violet-500/10 px-4 py-1.5">
         <span className="h-1.5 w-1.5 rounded-full bg-violet-400 animate-pulse" />
         <span className="text-xs font-medium text-violet-300 tracking-wide">
-          3 free downloads daily · Pro for unlimited + YouTube & LinkedIn
+          3 free downloads daily · Pro for unlimited + MP3 extraction
         </span>
       </div>
 
@@ -266,7 +282,7 @@ export default function Hero() {
       </h1>
 
       <p className="text-zinc-400 text-base md:text-lg text-center max-w-xl mb-8">
-        Paste a link from TikTok, X, Instagram or Facebook — plus YouTube & LinkedIn with Pro.
+        Paste a link from TikTok, X, Instagram or Facebook — download video or extract MP3 with Pro.
       </p>
 
       {/* Subscription status bar */}
@@ -395,7 +411,6 @@ export default function Hero() {
             {activePlatform ? (
               <span className={`shrink-0 text-xs font-semibold px-2.5 py-1 rounded-full border ${activePlatform.color} transition-all duration-300`}>
                 {activePlatform.label}
-                {activePlatform.proOnly && <span className="ml-1 text-yellow-400">★</span>}
               </span>
             ) : (
               <Link2 className="h-5 w-5 text-zinc-500 shrink-0" />
@@ -408,7 +423,6 @@ export default function Hero() {
                 setUrl(e.target.value)
                 setError('')
                 setHitFreeLimit(false)
-                setIsProOnly(false)
                 if (status === 'success') {
                   setStatus('idle')
                   setResult(null)
@@ -456,34 +470,6 @@ export default function Hero() {
           </div>
         )}
 
-        {/* Pro-only platform blocked */}
-        {isProOnly && (
-          <div className="mt-3 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3">
-            <div className="flex items-center gap-2 mb-1">
-              <Crown className="h-4 w-4 text-yellow-400 shrink-0" />
-              <p className="text-sm font-semibold text-white">{blockedPlatform} is a Pro feature</p>
-            </div>
-            <p className="text-xs text-zinc-400 mb-3">
-              Upgrade to Clipio Pro to download {blockedPlatform} videos — unlimited, full quality.
-            </p>
-            <div className="flex items-center gap-2 flex-wrap">
-              <Link
-                href="/pricing"
-                className="inline-flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-500 hover:to-fuchsia-500 rounded-xl text-sm font-semibold text-white transition"
-              >
-                <Crown className="h-4 w-4" />
-                Get Clipio Pro
-              </Link>
-              <button
-                onClick={() => { setShowEmailPrompt(true); setEmailInput(email) }}
-                className="text-xs text-zinc-400 hover:text-white border border-zinc-700 hover:border-zinc-500 px-3 py-2 rounded-xl transition"
-              >
-                Already subscribed?
-              </button>
-            </div>
-          </div>
-        )}
-
         {/* Free limit hit */}
         {hitFreeLimit && (
           <div className="mt-3 rounded-xl border border-orange-500/30 bg-orange-500/10 px-4 py-3">
@@ -492,7 +478,7 @@ export default function Hero() {
               <p className="text-sm font-semibold text-white">You've used all 3 free downloads today</p>
             </div>
             <p className="text-xs text-zinc-400 mb-3">
-              Free downloads reset at midnight. Subscribe to Clipio Pro for unlimited downloads anytime — no limits, full quality.
+              Free downloads reset at midnight. Subscribe to Clipio Pro for unlimited downloads anytime.
             </p>
             <div className="flex items-center gap-2 flex-wrap">
               <Link
@@ -603,7 +589,8 @@ export default function Hero() {
               )}
             </div>
 
-            <div className="px-4 py-4">
+            {/* Download buttons */}
+            <div className="px-4 py-4 flex flex-col gap-2">
               <button
                 onClick={handleSaveVideo}
                 disabled={isSaving}
@@ -612,9 +599,32 @@ export default function Hero() {
                 {isSaving ? (
                   <><Loader2 className="h-4 w-4 animate-spin" />Downloading…</>
                 ) : (
-                  <><Download className="h-4 w-4" />Download</>
+                  <><Download className="h-4 w-4" />Download Video</>
                 )}
               </button>
+
+              {/* MP3 button */}
+              {isSubscribed ? (
+                <button
+                  onClick={handleMp3}
+                  disabled={isMp3Loading}
+                  className="w-full flex items-center justify-center gap-2 rounded-xl border border-violet-500/40 bg-violet-500/10 hover:bg-violet-500/20 py-3 text-sm font-semibold text-violet-300 hover:text-white transition disabled:opacity-50"
+                >
+                  {isMp3Loading ? (
+                    <><Loader2 className="h-4 w-4 animate-spin" />Extracting audio…</>
+                  ) : (
+                    <>🎵 Download MP3 (320kbps)</>
+                  )}
+                </button>
+              ) : (
+                <Link
+                  href="/pricing"
+                  className="w-full flex items-center justify-center gap-2 rounded-xl border border-zinc-700 hover:border-violet-500/40 py-3 text-sm font-semibold text-zinc-500 hover:text-white transition"
+                >
+                  <Crown className="h-4 w-4" />
+                  MP3 Extract — Pro only
+                </Link>
+              )}
             </div>
           </div>
         )}
@@ -632,7 +642,6 @@ export default function Hero() {
               }`}
             >
               {p.label}
-              {p.proOnly && <span className="ml-1 text-yellow-500/70">★ Pro</span>}
             </span>
           )
         })}
