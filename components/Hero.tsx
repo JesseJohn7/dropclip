@@ -48,6 +48,7 @@ export default function Hero() {
   const [isPlaying, setIsPlaying] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
   const [isMp3Loading, setIsMp3Loading] = useState(false)
+  const [mp3Error, setMp3Error] = useState('')
   const [clipboardSuggestion, setClipboardSuggestion] = useState('')
   const [showClipboardBanner, setShowClipboardBanner] = useState(false)
   const hasCheckedClipboard = useRef(false)
@@ -177,6 +178,7 @@ export default function Hero() {
     setResult(null)
     setIsPlaying(false)
     setHitFreeLimit(false)
+    setMp3Error('')
 
     try {
       const res = await fetch('/api/download', {
@@ -211,6 +213,7 @@ export default function Hero() {
     setIsSaving(false)
     setIsMp3Loading(false)
     setHitFreeLimit(false)
+    setMp3Error('')
     hasCheckedClipboard.current = false
   }
 
@@ -229,27 +232,64 @@ export default function Hero() {
   const handleMp3 = async () => {
     if (!result) return
     setIsMp3Loading(true)
+    setMp3Error('')
+
     try {
       const res = await fetch('/api/mp3', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url, email: email || undefined }),
       })
+
       const data = await res.json()
 
       if (!res.ok) {
-        alert(data.error || 'Could not extract audio')
+        setMp3Error(data.error || 'Could not extract audio. Try again.')
         return
       }
 
-      const a = document.createElement('a')
-      a.href = proxyUrl(data.downloadUrl)
-      a.download = `${data.title ?? 'clipio-audio'}.mp3`
-      document.body.appendChild(a)
-      a.click()
-      document.body.removeChild(a)
+      const downloadUrl: string = data.downloadUrl
+
+      if (!downloadUrl) {
+        setMp3Error('No audio URL returned. Try again.')
+        return
+      }
+
+      // ── Download trigger ──────────────────────────────────────────────
+      // Do NOT proxy MP3 URLs — proxy is for video only and will hang.
+      // Use a direct anchor click; fall back to window.open if blocked.
+      const filename = `${data.title ?? 'clipio-audio'}.mp3`
+
+      try {
+        // Fetch the audio as a blob so the browser downloads instead of navigating
+        const audioRes = await fetch(downloadUrl)
+        if (!audioRes.ok) throw new Error('blob fetch failed')
+        const blob = await audioRes.blob()
+        const blobUrl = URL.createObjectURL(blob)
+
+        const a = document.createElement('a')
+        a.href = blobUrl
+        a.download = filename
+        document.body.appendChild(a)
+        a.click()
+        document.body.removeChild(a)
+
+        // Clean up blob URL after a short delay
+        setTimeout(() => URL.revokeObjectURL(blobUrl), 10_000)
+      } catch {
+        // Blob fetch failed (e.g. CORS) — fall back to direct link in new tab
+        const a = document.createElement('a')
+        a.href = downloadUrl
+        a.download = filename
+        a.target = '_blank'
+        a.rel = 'noopener noreferrer'
+        document.body.appendChild(a)
+        a.click()
+        document.body.removeChild(a)
+      }
+
     } catch {
-      alert('Failed to extract audio. Try again.')
+      setMp3Error('Failed to extract audio. Try again.')
     } finally {
       setIsMp3Loading(false)
     }
@@ -423,6 +463,7 @@ export default function Hero() {
                 setUrl(e.target.value)
                 setError('')
                 setHitFreeLimit(false)
+                setMp3Error('')
                 if (status === 'success') {
                   setStatus('idle')
                   setResult(null)
@@ -605,17 +646,25 @@ export default function Hero() {
 
               {/* MP3 button */}
               {isSubscribed ? (
-                <button
-                  onClick={handleMp3}
-                  disabled={isMp3Loading}
-                  className="w-full flex items-center justify-center gap-2 rounded-xl border border-violet-500/40 bg-violet-500/10 hover:bg-violet-500/20 py-3 text-sm font-semibold text-violet-300 hover:text-white transition disabled:opacity-50"
-                >
-                  {isMp3Loading ? (
-                    <><Loader2 className="h-4 w-4 animate-spin" />Extracting audio…</>
-                  ) : (
-                    <>🎵 Download MP3 (320kbps)</>
+                <div className="flex flex-col gap-1.5">
+                  <button
+                    onClick={handleMp3}
+                    disabled={isMp3Loading}
+                    className="w-full flex items-center justify-center gap-2 rounded-xl border border-violet-500/40 bg-violet-500/10 hover:bg-violet-500/20 py-3 text-sm font-semibold text-violet-300 hover:text-white transition disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {isMp3Loading ? (
+                      <><Loader2 className="h-4 w-4 animate-spin" />Extracting audio…</>
+                    ) : (
+                      <>🎵 Download MP3</>
+                    )}
+                  </button>
+                  {mp3Error && (
+                    <div className="flex items-center gap-1.5 px-1">
+                      <XCircle className="h-3.5 w-3.5 text-red-400 shrink-0" />
+                      <span className="text-xs text-red-400">{mp3Error}</span>
+                    </div>
                   )}
-                </button>
+                </div>
               ) : (
                 <Link
                   href="/pricing"
