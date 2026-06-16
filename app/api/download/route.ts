@@ -63,7 +63,13 @@ async function checkAndIncrementFree(ip: string): Promise<{ allowed: boolean; re
   return { allowed: true, remaining: FREE_LIMIT - (currentCount + 1) }
 }
 
-async function fetchFromCobalt(url: string): Promise<{ ok: true; downloadUrl: string } | { ok: false; error: string; status: number }> {
+// ── Quality type ──────────────────────────────────────────────────────────────
+export type VideoQuality = '1080' | '720' | '480'
+
+async function fetchFromCobalt(
+  url: string,
+  quality: VideoQuality = '720'
+): Promise<{ ok: true; downloadUrl: string } | { ok: false; error: string; status: number }> {
   const COBALT_URL = process.env.COBALT_API_URL
   if (!COBALT_URL) {
     return { ok: false, error: 'Cobalt API not configured.', status: 500 }
@@ -78,7 +84,7 @@ async function fetchFromCobalt(url: string): Promise<{ ok: true; downloadUrl: st
       },
       body: JSON.stringify({
         url,
-        videoQuality: 'max',
+        videoQuality: quality,   // ← pass quality directly to Cobalt
         filenameStyle: 'pretty',
         tiktokFullAudio: false,
       }),
@@ -120,15 +126,15 @@ async function fetchFromCobalt(url: string): Promise<{ ok: true; downloadUrl: st
   }
 }
 
-async function logDownload(url: string, platform: string, ip: string) {
+async function logDownload(url: string, platform: string, ip: string, quality: string) {
   const { error } = await supabase
     .from('download_requests')
-    .insert({ url, platform, ip, status: 'success' })
+    .insert({ url, platform, ip, status: 'success', quality })
   if (error) console.error('Supabase log error:', error)
 }
 
 export async function POST(req: NextRequest) {
-  let body: { url?: string; email?: string }
+  let body: { url?: string; email?: string; quality?: VideoQuality }
 
   try {
     body = await req.json()
@@ -136,7 +142,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid request body.' }, { status: 400 })
   }
 
-  const { url, email } = body
+  const { url, email, quality } = body
 
   if (!url || typeof url !== 'string' || !url.trim()) {
     return NextResponse.json({ error: 'URL is required.' }, { status: 400 })
@@ -150,62 +156,65 @@ export async function POST(req: NextRequest) {
 
   const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? 'unknown'
   const platform = detectPlatform(url)
-
-  // Check if pro subscriber
   const subscribed = email ? await checkSubscribed(email) : false
 
-  // If not subscribed, check and consume a free download
-  if (!subscribed) {
-    const { allowed, remaining } = await checkAndIncrementFree(ip)
+  // ── Pro user: respect their quality choice ────────────────────────────────
+  if (subscribed) {
+    const selectedQuality: VideoQuality =
+      quality && ['1080', '720', '480'].includes(quality) ? quality : '1080'
 
-    if (!allowed) {
-      return NextResponse.json(
-        { requiresSubscription: true, freeLimit: true },
-        { status: 403 }
-      )
-    }
-
-    const cobaltResult = await fetchFromCobalt(url)
+    const cobaltResult = await fetchFromCobalt(url, selectedQuality)
 
     if (!cobaltResult.ok) {
-      // Undo the increment so the failed attempt doesn't cost them a free download
-      const today = new Date().toISOString().split('T')[0]
-      const { data } = await supabase
-        .from('free_downloads')
-        .select('count')
-        .eq('ip', ip)
-        .eq('date', today)
-        .maybeSingle()
-      if (data && data.count > 0) {
-        await supabase
-          .from('free_downloads')
-          .upsert({ ip, date: today, count: data.count - 1 }, { onConflict: 'ip,date' })
-      }
       return NextResponse.json({ error: cobaltResult.error }, { status: cobaltResult.status })
     }
 
-    await logDownload(url, platform, ip)
+    await logDownload(url, platform, ip, selectedQuality)
 
     return NextResponse.json({
       downloadUrl: cobaltResult.downloadUrl,
       title: buildFilename(platform),
       platform,
-      freeDownloadsRemaining: remaining,
+      quality: selectedQuality,
     })
   }
 
-  // Pro user — unlimited
-  const cobaltResult = await fetchFromCobalt(url)
+  // ── Free user: locked to 720p, check daily limit ──────────────────────────
+  const { allowed, remaining } = await checkAndIncrementFree(ip)
+
+  if (!allowed) {
+    return NextResponse.json(
+      { requiresSubscription: true, freeLimit: true },
+      { status: 403 }
+    )
+  }
+
+  const cobaltResult = await fetchFromCobalt(url, '720')
 
   if (!cobaltResult.ok) {
+    // Undo increment so failed attempt doesn't cost a free download
+    const today = new Date().toISOString().split('T')[0]
+    const { data } = await supabase
+      .from('free_downloads')
+      .select('count')
+      .eq('ip', ip)
+      .eq('date', today)
+      .maybeSingle()
+    if (data && data.count > 0) {
+      await supabase
+        .from('free_downloads')
+        .upsert({ ip, date: today, count: data.count - 1 }, { onConflict: 'ip,date' })
+    }
     return NextResponse.json({ error: cobaltResult.error }, { status: cobaltResult.status })
   }
 
-  await logDownload(url, platform, ip)
+  await logDownload(url, platform, ip, '720')
 
   return NextResponse.json({
     downloadUrl: cobaltResult.downloadUrl,
     title: buildFilename(platform),
     platform,
+    freeDownloadsRemaining: remaining,
+    quality: '720',
   })
 }
