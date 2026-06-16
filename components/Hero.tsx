@@ -11,6 +11,13 @@ const PLATFORMS = [
   { label: 'Facebook', domains: ['facebook.com', 'fb.watch'], color: 'text-blue-400 border-blue-500/40 bg-blue-500/10', proOnly: false },
 ]
 
+const QUALITY_OPTIONS = [
+  { value: '1080', label: '1080p', sublabel: 'Full HD' },
+  { value: '720',  label: '720p',  sublabel: 'HD' },
+  { value: '480',  label: '480p',  sublabel: 'Standard' },
+] as const
+
+type VideoQuality = '1080' | '720' | '480'
 type Status = 'idle' | 'loading' | 'success' | 'error'
 
 function detectPlatform(url: string) {
@@ -42,6 +49,7 @@ export default function Hero() {
     downloadUrl: string
     title: string
     platform: string
+    quality?: string
     freeDownloadsRemaining?: number
   } | null>(null)
   const [error, setError] = useState('')
@@ -52,6 +60,9 @@ export default function Hero() {
   const [clipboardSuggestion, setClipboardSuggestion] = useState('')
   const [showClipboardBanner, setShowClipboardBanner] = useState(false)
   const hasCheckedClipboard = useRef(false)
+
+  // Quality picker — Pro only, defaults to 1080p
+  const [selectedQuality, setSelectedQuality] = useState<VideoQuality>('1080')
 
   // Subscription state
   const [email, setEmail] = useState('')
@@ -184,7 +195,12 @@ export default function Hero() {
       const res = await fetch('/api/download', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url, email: email || undefined }),
+        body: JSON.stringify({
+          url,
+          email: email || undefined,
+          // Pro users send their chosen quality; free users the API ignores this and uses 720p
+          quality: isSubscribed ? selectedQuality : undefined,
+        }),
       })
       const data = await res.json()
 
@@ -249,35 +265,26 @@ export default function Hero() {
       }
 
       const downloadUrl: string = data.downloadUrl
-
       if (!downloadUrl) {
         setMp3Error('No audio URL returned. Try again.')
         return
       }
 
-      // ── Download trigger ──────────────────────────────────────────────
-      // Do NOT proxy MP3 URLs — proxy is for video only and will hang.
-      // Use a direct anchor click; fall back to window.open if blocked.
       const filename = `${data.title ?? 'clipio-audio'}.mp3`
 
       try {
-        // Fetch the audio as a blob so the browser downloads instead of navigating
         const audioRes = await fetch(downloadUrl)
         if (!audioRes.ok) throw new Error('blob fetch failed')
         const blob = await audioRes.blob()
         const blobUrl = URL.createObjectURL(blob)
-
         const a = document.createElement('a')
         a.href = blobUrl
         a.download = filename
         document.body.appendChild(a)
         a.click()
         document.body.removeChild(a)
-
-        // Clean up blob URL after a short delay
         setTimeout(() => URL.revokeObjectURL(blobUrl), 10_000)
       } catch {
-        // Blob fetch failed (e.g. CORS) — fall back to direct link in new tab
         const a = document.createElement('a')
         a.href = downloadUrl
         a.download = filename
@@ -287,7 +294,6 @@ export default function Hero() {
         a.click()
         document.body.removeChild(a)
       }
-
     } catch {
       setMp3Error('Failed to extract audio. Try again.')
     } finally {
@@ -309,7 +315,7 @@ export default function Hero() {
       <div className="mb-6 flex items-center gap-2 rounded-full border border-violet-500/30 bg-violet-500/10 px-4 py-1.5">
         <span className="h-1.5 w-1.5 rounded-full bg-violet-400 animate-pulse" />
         <span className="text-xs font-medium text-violet-300 tracking-wide">
-          3 free downloads daily · Pro for unlimited + MP3 extraction
+          3 free downloads daily · Pro for unlimited + MP3 + 1080p
         </span>
       </div>
 
@@ -322,7 +328,7 @@ export default function Hero() {
       </h1>
 
       <p className="text-zinc-400 text-base md:text-lg text-center max-w-xl mb-8">
-        Paste a link from TikTok, X, Instagram or Facebook — download video or extract MP3 with Pro.
+        Paste a link from TikTok, X, Instagram or Facebook — download in full quality or extract MP3 with Pro.
       </p>
 
       {/* Subscription status bar */}
@@ -439,6 +445,34 @@ export default function Hero() {
                 <X className="h-4 w-4" />
               </button>
             </div>
+          </div>
+        )}
+
+        {/* ── Quality picker (Pro only, shows above the input) ── */}
+        {isSubscribed && status !== 'success' && (
+          <div className="mb-3 flex items-center gap-2">
+            <span className="text-xs text-zinc-500 shrink-0">Quality:</span>
+            <div className="flex gap-1.5">
+              {QUALITY_OPTIONS.map(q => (
+                <button
+                  key={q.value}
+                  onClick={() => setSelectedQuality(q.value)}
+                  className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all duration-200 ${
+                    selectedQuality === q.value
+                      ? 'bg-violet-600 border-violet-500 text-white shadow-sm shadow-violet-500/30'
+                      : 'bg-zinc-900 border-zinc-700 text-zinc-400 hover:border-zinc-500 hover:text-zinc-200'
+                  }`}
+                >
+                  {q.label}
+                  <span className={`text-[10px] font-normal ${selectedQuality === q.value ? 'text-violet-200' : 'text-zinc-600'}`}>
+                    {q.sublabel}
+                  </span>
+                </button>
+              ))}
+            </div>
+            <span className="ml-auto flex items-center gap-1 text-[10px] text-violet-400 border border-violet-500/20 bg-violet-500/10 px-2 py-0.5 rounded-full">
+              <Crown className="h-2.5 w-2.5" /> Pro
+            </span>
           </div>
         )}
 
@@ -587,14 +621,26 @@ export default function Hero() {
                 <CheckCircle className="h-4 w-4 text-emerald-400 shrink-0" />
                 <span className="text-sm font-medium text-white truncate">{result.title}</span>
               </div>
-              {(() => {
-                const p = PLATFORMS.find(p => p.label === result.platform)
-                return p ? (
-                  <span className={`shrink-0 ml-3 text-xs font-semibold px-2.5 py-1 rounded-full border ${p.color}`}>
-                    {result.platform}
+              <div className="flex items-center gap-2 shrink-0 ml-3">
+                {/* Quality badge */}
+                {result.quality && (
+                  <span className={`text-xs font-bold px-2 py-0.5 rounded-full border ${
+                    result.quality === '1080'
+                      ? 'text-violet-300 border-violet-500/40 bg-violet-500/10'
+                      : 'text-zinc-400 border-zinc-700 bg-zinc-800'
+                  }`}>
+                    {result.quality}p
                   </span>
-                ) : null
-              })()}
+                )}
+                {(() => {
+                  const p = PLATFORMS.find(p => p.label === result.platform)
+                  return p ? (
+                    <span className={`text-xs font-semibold px-2.5 py-1 rounded-full border ${p.color}`}>
+                      {result.platform}
+                    </span>
+                  ) : null
+                })()}
+              </div>
             </div>
 
             <div className="relative bg-black">
@@ -640,7 +686,7 @@ export default function Hero() {
                 {isSaving ? (
                   <><Loader2 className="h-4 w-4 animate-spin" />Downloading…</>
                 ) : (
-                  <><Download className="h-4 w-4" />Download Video</>
+                  <><Download className="h-4 w-4" />Download Video {result.quality ? `(${result.quality}p)` : ''}</>
                 )}
               </button>
 
