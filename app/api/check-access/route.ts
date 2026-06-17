@@ -8,7 +8,8 @@ const supabase = createClient(
 
 const PRO_EMAILS = [
   'jessejohn260@gmail.com',
-  'olaojosuccess@gmail.com', // manually granted pro access
+  'olaojosuccess@gmail.com',
+  'codewithhonour@gmai.com' // manually granted pro access
 ]
 
 export async function GET(req: NextRequest) {
